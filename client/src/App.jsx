@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Route, Routes } from 'react-router-dom';
 import { FileSpreadsheet, History, LayoutTemplate, Plus, Sparkles } from 'lucide-react';
-import { api } from './api.js';
+import { api, apiProblem } from './api.js';
 import CreatePaper from './pages/CreatePaper.jsx';
 import HistoryPage from './pages/HistoryPage.jsx';
 import PaperPage from './pages/PaperPage.jsx';
@@ -51,12 +51,7 @@ export default function App() {
         </div>
       </header>
 
-      {apiDown && (
-        <div className="banner">
-          Cannot reach the API server. Start it with <code>npm run dev</code> in the project folder and check{' '}
-          <code>server/.env</code>.
-        </div>
-      )}
+      {apiDown && <div className="banner">{apiProblem()}</div>}
 
       <main>
         <Routes>

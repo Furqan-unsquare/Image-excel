@@ -99,8 +99,8 @@ export default function ImageDropzone({ images, onChange, max = 10 }) {
           <span className="touch-only">Add photos of the questions</span>
         </div>
         <div className="muted small">
-          <span className="desktop-hint">Click to browse, or paste with Ctrl+V · </span>· up to {max}{' '}
-          images, in page order
+          <span className="desktop-hint">Click to browse, or paste with Ctrl+V · up to {max} images, in page order</span>
+          <span className="touch-only">Up to {max} images, in page order</span>
         </div>
         <div className="dropzone-buttons touch-only">
           <button

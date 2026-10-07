@@ -13,7 +13,12 @@ import { failInterruptedPapers } from './services/paperProcessor.js';
 
 const app = express();
 app.disable('x-powered-by');
-app.use(cors({ origin: config.corsOrigin === '*' ? true : config.corsOrigin.split(',').map((s) => s.trim()) }));
+// CORS_ORIGIN: '*' or a comma-separated list such as https://papers.netlify.app (a trailing '/' is ignored).
+const allowedOrigins = config.corsOrigin
+  .split(',')
+  .map((o) => o.trim().replace(/\/+$/, ''))
+  .filter(Boolean);
+app.use(cors({ origin: allowedOrigins.includes('*') || !allowedOrigins.length ? true : allowedOrigins }));
 app.use(express.json({ limit: '4mb' }));
 
 app.get('/api/health', (req, res) => {

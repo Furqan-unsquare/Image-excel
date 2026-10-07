@@ -49,7 +49,12 @@ On first start, the sample format in `server/seed/` (`Unit 1 History Paper.xlsx`
 
 There are two ways to deploy:
 
-- **Two deployments.** Build the client (`cd client && npm run build`) and host `client/dist` on any static host (Netlify, Vercel, Nginx). Set `VITE_API_URL=https://your-api-domain` in `client/.env` *before* building. Run the server with `npm start` (Render, Railway, a VPS…) and set `CORS_ORIGIN` to the client's URL.
+- **Two deployments (recommended).**
+  1. **API:** deploy `server/` (Render, Railway, a VPS…) with the start command `npm start`. Put the values from `server/.env` into the host's environment variables, and set `CORS_ORIGIN` to the app's URL, e.g. `https://papersheet.netlify.app`.
+  2. **App:** deploy `client/` as a static site with build command `npm run build` and publish folder `dist`. Set **`VITE_API_URL`** to the API address, e.g. `https://papersheet-api.onrender.com` (no `/api` at the end). Put it in the host's environment variables if the host builds from GitHub, or in `client/.env.production` if you build on your PC. It is baked in at build time, so rebuild after changing it.
+  3. Page refreshes on deep links like `/papers/123` already work on Netlify (`client/public/_redirects`) and Vercel (`client/vercel.json`). On other static hosts, add a rewrite of all paths to `/index.html`.
+
+  If the app can't reach the API, it shows the exact problem at the top of the page: either `VITE_API_URL` is missing, or the API is down or blocked by CORS.
 - **One deployment.** Build the client, then set `CLIENT_DIST_DIR=../client/dist` in `server/.env`. `npm start` in `server/` then serves both the API and the app on `PORT`.
 
 ---
