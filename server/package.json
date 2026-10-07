@@ -1,0 +1,30 @@
+{
+  "name": "image-to-excel-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "API: converts question paper images into formatted Excel files (Express + MongoDB + Groq)",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js",
+    "check-db": "node src/scripts/checkDb.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.5",
+    "exceljs": "^4.4.0",
+    "express": "^5.2.1",
+    "jszip": "^3.10.2",
+    "mongoose": "^9.11.0",
+    "multer": "^2.4.0",
+    "sharp": "^0.35.5",
+    "tesseract.js": "^7.0.0"
+  },
+  "overrides": {
+    "uuid": "^11.1.1"
+  }
+}

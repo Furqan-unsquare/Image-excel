@@ -1,0 +1,21 @@
+# One repo with both apps (server/ and client/). These rules apply to every folder.
+
+# Dependencies
+node_modules/
+
+# Secrets – never commit real keys or database passwords
+.env
+.env.*
+!.env.example
+
+# Build output and caches
+dist/
+.cache/
+*.log
+npm-debug.log*
+
+# Office temp files and OS files
+~$*
+.DS_Store
+Thumbs.db
+desktop.ini
