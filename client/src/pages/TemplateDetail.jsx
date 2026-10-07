@@ -4,6 +4,7 @@ import { ArrowLeft, Download, LoaderCircle, RefreshCw, Save, Sparkles, Trash2, T
 import { api, colLetter } from '../api.js';
 import PreviewPanel from '../components/PreviewPanel.jsx';
 import { useTemplatePreview } from '../components/TemplateCard.jsx';
+import { Loading, LoadError } from '../components/Status.jsx';
 import { useToast } from '../components/Toast.jsx';
 
 const NUMBER_STYLES = [
@@ -86,8 +87,14 @@ export default function TemplateDetail({ health }) {
     setSettings(settingsFromProfile(t.profile));
   };
 
+  const fetchTemplate = () => {
+    setError('');
+    return api.templates.get(id).then(load).catch((e) => setError(e.message));
+  };
+
   useEffect(() => {
-    api.templates.get(id).then(load).catch((e) => setError(e.message));
+    fetchTemplate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   const { model, error: previewError } = useTemplatePreview(id, view, template?.updatedAt || '');
@@ -131,11 +138,21 @@ export default function TemplateDetail({ health }) {
     }
   };
 
-  if (error) return <div className="page"><div className="alert alert-error">{error}</div></div>;
+  if (error) {
+    return (
+      <div className="page">
+        <LoadError message={`Could not load this format. ${error}`} onRetry={fetchTemplate}>
+          <Link className="btn btn-sm" to="/templates">
+            <ArrowLeft size={15} /> Formats
+          </Link>
+        </LoadError>
+      </div>
+    );
+  }
   if (!template || !settings) {
     return (
-      <div className="page center-msg">
-        <LoaderCircle className="spin" size={22} /> Loading…
+      <div className="page">
+        <Loading label="Loading format…" />
       </div>
     );
   }

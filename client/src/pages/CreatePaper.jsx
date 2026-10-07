@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FileSpreadsheet, LoaderCircle, Plus, Wand2 } from 'lucide-react';
+import { Loading, LoadError } from '../components/Status.jsx';
 import { api } from '../api.js';
 import ImageDropzone from '../components/ImageDropzone.jsx';
 import TemplateCard from '../components/TemplateCard.jsx';
@@ -32,18 +33,24 @@ export default function CreatePaper({ health }) {
   const [uploadOpen, setUploadOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [loadError, setLoadError] = useState('');
   const navigate = useNavigate();
   const toast = useToast();
 
-  useEffect(() => {
-    api.templates
-      .list()
-      .then((list) => {
-        setTemplates(list);
-        setSelectedId((current) => (list.some((t) => t.id === current) ? current : list[0]?.id || null));
-      })
-      .catch((e) => setError(e.message));
+  const loadTemplates = useCallback(async () => {
+    setLoadError('');
+    try {
+      const list = await api.templates.list();
+      setTemplates(list);
+      setSelectedId((current) => (list.some((t) => t.id === current) ? current : list[0]?.id || null));
+    } catch (e) {
+      setLoadError(e.message);
+    }
   }, []);
+
+  useEffect(() => {
+    loadTemplates();
+  }, [loadTemplates]);
 
   const select = (t) => {
     setSelectedId(t.id);
@@ -91,11 +98,8 @@ export default function CreatePaper({ health }) {
             <Plus size={16} /> Upload new file
           </button>
         </div>
-        {templates === null && !error && (
-          <div className="center-msg">
-            <LoaderCircle className="spin" size={20} /> Loading formats…
-          </div>
-        )}
+        {templates === null && !loadError && <Loading label="Loading formats…" />}
+        {templates === null && loadError && <LoadError message={`Could not load formats. ${loadError}`} onRetry={loadTemplates} />}
         {templates?.length === 0 && (
           <div className="empty">
             <FileSpreadsheet size={32} />

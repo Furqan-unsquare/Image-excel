@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { NavLink, Route, Routes } from 'react-router-dom';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import { FileSpreadsheet, History, LayoutTemplate, Plus, Sparkles } from 'lucide-react';
 import { api, apiProblem } from './api.js';
 import CreatePaper from './pages/CreatePaper.jsx';
@@ -7,20 +7,35 @@ import HistoryPage from './pages/HistoryPage.jsx';
 import PaperPage from './pages/PaperPage.jsx';
 import TemplateDetail from './pages/TemplateDetail.jsx';
 import TemplatesPage from './pages/TemplatesPage.jsx';
+import { ErrorBoundary } from './components/Status.jsx';
 
 export default function App() {
   const [health, setHealth] = useState(null);
   const [apiDown, setApiDown] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const retryTimer = useRef(null);
+  const location = useLocation();
+
+  // The layout never waits for the API. If the API can't be reached a banner
+  // explains why, and the connection is checked again every 15 seconds.
+  const checkHealth = useCallback(async () => {
+    clearTimeout(retryTimer.current);
+    setChecking(true);
+    try {
+      setHealth(await api.health());
+      setApiDown(false);
+    } catch {
+      setApiDown(true);
+      retryTimer.current = setTimeout(checkHealth, 15000);
+    } finally {
+      setChecking(false);
+    }
+  }, []);
 
   useEffect(() => {
-    api
-      .health()
-      .then((h) => {
-        setHealth(h);
-        setApiDown(false);
-      })
-      .catch(() => setApiDown(true));
-  }, []);
+    checkHealth();
+    return () => clearTimeout(retryTimer.current);
+  }, [checkHealth]);
 
   return (
     <div className="app">
@@ -51,9 +66,17 @@ export default function App() {
         </div>
       </header>
 
-      {apiDown && <div className="banner">{apiProblem()}</div>}
+      {apiDown && (
+        <div className="banner" role="alert">
+          <span>{apiProblem()} Retrying automatically…</span>
+          <button type="button" className="banner-btn" onClick={checkHealth} disabled={checking}>
+            {checking ? 'Checking…' : 'Retry now'}
+          </button>
+        </div>
+      )}
 
       <main>
+        <ErrorBoundary resetKey={location.pathname}>
         <Routes>
           <Route path="/" element={<CreatePaper health={health} />} />
           <Route path="/papers/:id" element={<PaperPage />} />
@@ -70,6 +93,7 @@ export default function App() {
             }
           />
         </Routes>
+        </ErrorBoundary>
       </main>
 
       <footer className="app-footer">

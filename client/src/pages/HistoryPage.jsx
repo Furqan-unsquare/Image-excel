@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Download, History, LoaderCircle, Plus, Trash2 } from 'lucide-react';
+import { Download, History, Plus, Trash2 } from 'lucide-react';
+import { Loading, LoadError } from '../components/Status.jsx';
 import { api, formatDate } from '../api.js';
 import { useToast } from '../components/Toast.jsx';
 
@@ -15,9 +16,18 @@ export default function HistoryPage() {
   const [error, setError] = useState('');
   const toast = useToast();
 
-  useEffect(() => {
-    api.papers.list().then(setPapers).catch((e) => setError(e.message));
+  const load = useCallback(async () => {
+    setError('');
+    try {
+      setPapers(await api.papers.list());
+    } catch (e) {
+      setError(e.message);
+    }
   }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   const remove = async (paper) => {
     if (!window.confirm(`Delete "${paper.title}"?`)) return;
@@ -42,12 +52,8 @@ export default function HistoryPage() {
         </Link>
       </div>
 
-      {error && <div className="alert alert-error">{error}</div>}
-      {papers === null && !error && (
-        <div className="center-msg">
-          <LoaderCircle className="spin" size={20} /> Loading…
-        </div>
-      )}
+      {error && <LoadError message={`Could not load your papers. ${error}`} onRetry={load} />}
+      {papers === null && !error && <Loading label="Loading papers…" />}
       {papers?.length === 0 && (
         <div className="card empty">
           <History size={32} />

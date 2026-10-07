@@ -1,0 +1,14 @@
+# Netlify reads this file from the site's base directory ("client").
+# It overrides the dashboard: the built app is in "dist", not the source folder.
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+# Single-page app: every path (e.g. /papers/123) serves index.html.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

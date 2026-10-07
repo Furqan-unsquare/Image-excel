@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { api, formatDate } from '../api.js';
 import PaperEditor from '../components/PaperEditor.jsx';
+import { Loading, LoadError } from '../components/Status.jsx';
 import PreviewPanel from '../components/PreviewPanel.jsx';
 import SheetPreview from '../components/SheetPreview.jsx';
 import { useToast } from '../components/Toast.jsx';
@@ -28,7 +29,7 @@ const STAGES = [
   { key: 'excel', label: 'Building the Excel file' },
 ];
 
-function Processing({ paper }) {
+function Processing({ paper, connectionIssue }) {
   const current = STAGES.findIndex((s) => s.key === paper.progress?.stage);
   return (
     <div className="card processing">
@@ -39,6 +40,9 @@ function Processing({ paper }) {
           <p className="muted small">{paper.progress?.message || 'Starting'} · this usually takes 10–60 seconds</p>
         </div>
       </div>
+      {connectionIssue && (
+        <div className="alert alert-warn small">Connection problem ({connectionIssue}). Still trying…</div>
+      )}
       <div className="progress">
         <div className="progress-bar" style={{ width: `${Math.max(4, paper.progress?.percent || 0)}%` }} />
       </div>
@@ -107,12 +111,25 @@ export default function PaperPage() {
     loadPaper().catch((e) => setError(e.message));
   }, [loadPaper]);
 
-  // Poll while processing.
+  // Poll while processing. A failed poll (network blip, server waking up) keeps
+  // the page and tries again a little later instead of showing an error page.
+  const [pollIssue, setPollIssue] = useState('');
+  const [pollTick, setPollTick] = useState(0);
   useEffect(() => {
     if (paper?.status !== 'processing') return undefined;
-    const timer = setTimeout(() => loadPaper().catch((e) => setError(e.message)), 1500);
+    const timer = setTimeout(
+      () =>
+        loadPaper()
+          .then(() => setPollIssue(''))
+          .catch((e) => {
+            setPollIssue(e.message);
+            setPollTick((t) => t + 1);
+          }),
+      pollIssue ? 5000 : 1500,
+    );
     return () => clearTimeout(timer);
-  }, [paper, loadPaper]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paper, loadPaper, pollTick]);
 
   // Load the preview whenever a new Excel file was generated.
   useEffect(() => {
@@ -170,17 +187,24 @@ export default function PaperPage() {
   if (error) {
     return (
       <div className="page">
-        <div className="alert alert-error">{error}</div>
-        <Link className="btn" to="/">
-          <ArrowLeft size={16} /> New paper
-        </Link>
+        <LoadError
+          message={`Could not load this paper. ${error}`}
+          onRetry={() => {
+            setError('');
+            return loadPaper().catch((e) => setError(e.message));
+          }}
+        >
+          <Link className="btn btn-sm" to="/">
+            <ArrowLeft size={15} /> New paper
+          </Link>
+        </LoadError>
       </div>
     );
   }
   if (!paper) {
     return (
-      <div className="page center-msg">
-        <LoaderCircle className="spin" size={22} /> Loading…
+      <div className="page">
+        <Loading label="Loading paper…" />
       </div>
     );
   }
@@ -223,7 +247,7 @@ export default function PaperPage() {
         </div>
       </div>
 
-      {paper.status === 'processing' && <Processing paper={paper} />}
+      {paper.status === 'processing' && <Processing paper={paper} connectionIssue={pollIssue} />}
 
       {paper.status === 'failed' && (
         <div className="card failed">

@@ -1666,3 +1666,61 @@ textarea::placeholder {
     animation: none;
   }
 }
+
+/* ---------- loading / error states ---------- */
+.center-msg.column {
+  flex-direction: column;
+  gap: 6px;
+  text-align: center;
+}
+.load-error {
+  align-items: flex-start;
+}
+.load-error > svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.load-error-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.btn-sm {
+  height: 34px;
+  padding: 0 12px;
+  font-size: 0.85rem;
+}
+.banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+}
+.banner-btn {
+  border: 1px solid currentColor;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.85rem;
+  padding: 3px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.banner-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.thumb-error {
+  display: grid;
+  place-items: center;
+  width: 220px;
+  height: 100%;
+  min-height: 150px;
+  background: var(--surface);
+  border-radius: 3px;
+  color: var(--faint);
+  font-size: 0.85rem;
+}

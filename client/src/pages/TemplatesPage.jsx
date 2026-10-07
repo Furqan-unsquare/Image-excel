@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FileSpreadsheet, LoaderCircle, Plus } from 'lucide-react';
+import { FileSpreadsheet, Plus } from 'lucide-react';
+import { Loading, LoadError } from '../components/Status.jsx';
 import { api } from '../api.js';
 import TemplateCard from '../components/TemplateCard.jsx';
 import UploadTemplateDialog from '../components/UploadTemplateDialog.jsx';
@@ -13,9 +14,18 @@ export default function TemplatesPage({ health }) {
   const navigate = useNavigate();
   const toast = useToast();
 
-  useEffect(() => {
-    api.templates.list().then(setTemplates).catch((e) => setError(e.message));
+  const load = useCallback(async () => {
+    setError('');
+    try {
+      setTemplates(await api.templates.list());
+    } catch (e) {
+      setError(e.message);
+    }
   }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   return (
     <div className="page templates-page">
@@ -32,12 +42,8 @@ export default function TemplatesPage({ health }) {
         </button>
       </div>
 
-      {error && <div className="alert alert-error">{error}</div>}
-      {templates === null && !error && (
-        <div className="center-msg">
-          <LoaderCircle className="spin" size={20} /> Loading…
-        </div>
-      )}
+      {error && <LoadError message={`Could not load formats. ${error}`} onRetry={load} />}
+      {templates === null && !error && <Loading label="Loading formats…" />}
       {templates?.length === 0 && (
         <div className="card empty">
           <FileSpreadsheet size={32} />

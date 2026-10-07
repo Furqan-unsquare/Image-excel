@@ -42,7 +42,7 @@ export function templateSummary(profile) {
 }
 
 export default function TemplateCard({ template, selected, onSelect, footer }) {
-  const { model } = useTemplatePreview(template.id, 'preview', template.updatedAt);
+  const { model, error } = useTemplatePreview(template.id, 'preview', template.updatedAt);
   return (
     <button
       type="button"
@@ -51,7 +51,7 @@ export default function TemplateCard({ template, selected, onSelect, footer }) {
       aria-pressed={selected}
     >
       <div className="template-thumb-wrap">
-        <SheetThumbnail model={model} width={220} />
+        {error ? <div className="thumb-error">Preview unavailable</div> : <SheetThumbnail model={model} width={220} />}
         {selected && (
           <span className="selected-badge">
             <Check size={14} /> Selected
