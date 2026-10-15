@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Download, LoaderCircle, RefreshCw, Save, Sparkles, Trash2, TriangleAlert } from 'lucide-react';
 import { api, colLetter } from '../api.js';
+import { LANGUAGES } from '../lang.js';
 import PreviewPanel from '../components/PreviewPanel.jsx';
 import { useTemplatePreview } from '../components/TemplateCard.jsx';
 import { Loading, LoadError } from '../components/Status.jsx';
@@ -13,6 +14,10 @@ const NUMBER_STYLES = [
   ['alpha-upper', 'A, B, C'],
   ['roman-lower', 'i, ii, iii'],
   ['roman-upper', 'I, II, III'],
+  ['deva-digits', '१, २, ३'],
+  ['deva-abcd', 'अ, ब, स, द'],
+  ['deva-vowels', 'अ, आ, इ, ई'],
+  ['deva-consonants', 'क, ख, ग, घ'],
 ];
 
 const SPACING = [
@@ -27,6 +32,9 @@ const SPACING = [
 
 function settingsFromProfile(p) {
   return {
+    language: p.language || 'en',
+    digits: p.digits || 'latin',
+    options: { numberStyle: p.options?.numberStyle || 'alpha-lower' },
     question: {
       col: p.question.col,
       numberFormat: p.question.numberFormat,
@@ -100,6 +108,7 @@ export default function TemplateDetail({ health }) {
   const { model, error: previewError } = useTemplatePreview(id, view, template?.updatedAt || '');
 
   const set = (group, key, value) => setSettings((s) => ({ ...s, [group]: { ...s[group], [key]: value } }));
+  const setTop = (key, value) => setSettings((s) => ({ ...s, [key]: value }));
 
   const save = async () => {
     setBusy('save');
@@ -217,10 +226,30 @@ export default function TemplateDetail({ health }) {
               <span>Format name</span>
               <input value={name} onChange={(e) => setName(e.target.value)} maxLength={120} />
             </label>
+            <div className="grid-2">
+              <label className="field">
+                <span>Language of the papers</span>
+                <select value={s.language} onChange={(e) => setTop('language', e.target.value)}>
+                  {LANGUAGES.map((l) => (
+                    <option key={l.code} value={l.code}>
+                      {l.native === l.name ? l.name : `${l.native} (${l.name})`}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>Numbers in marks and header</span>
+                <select value={s.digits} onChange={(e) => setTop('digits', e.target.value)}>
+                  <option value="latin">1, 2, 3</option>
+                  <option value="devanagari">१, २, ३</option>
+                </select>
+              </label>
+            </div>
             <p className="muted small">
+              Photos converted with this format are read as {LANGUAGES.find((l) => l.code === s.language)?.name || 'English'}.
               Header kept from your file: rows 1–{p.header.endRow || 0}
               {p.header.cells?.length ? ` (${p.header.cells.map((c) => c.address).join(', ')})` : ''}. “Subject”, “Std/Class”,
-              “Marks”, “Time” and “Date” values are filled from the photo when found.
+              “Marks”, “Time” and “Date” values (विषय, कक्षा/इयत्ता, अंक/गुण, समय/वेळ, दिनांक) are filled from the photo when found.
             </p>
           </div>
 
@@ -346,6 +375,16 @@ export default function TemplateDetail({ health }) {
               <label className="field">
                 <span>Long lines continue in</span>
                 <ColumnSelect value={s.continuation.col} onChange={(v) => set('continuation', 'col', v)} />
+              </label>
+              <label className="field">
+                <span>Multiple-choice options</span>
+                <select value={s.options.numberStyle} onChange={(e) => set('options', 'numberStyle', e.target.value)}>
+                  {NUMBER_STYLES.map(([v, l]) => (
+                    <option key={v} value={v}>
+                      ({l.split(', ').slice(0, 3).join(') (')})
+                    </option>
+                  ))}
+                </select>
               </label>
             </div>
           </div>

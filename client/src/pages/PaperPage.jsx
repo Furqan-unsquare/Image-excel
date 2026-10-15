@@ -16,11 +16,19 @@ import {
   TriangleAlert,
 } from 'lucide-react';
 import { api, formatDate } from '../api.js';
+import { languageOf } from '../lang.js';
 import PaperEditor from '../components/PaperEditor.jsx';
 import { Loading, LoadError } from '../components/Status.jsx';
 import PreviewPanel from '../components/PreviewPanel.jsx';
 import SheetPreview from '../components/SheetPreview.jsx';
 import { useToast } from '../components/Toast.jsx';
+
+const OCR_METHODS = {
+  'groq-vision': 'Groq vision',
+  'groq-vision+tesseract': 'Groq vision + letter check',
+  tesseract: 'basic OCR',
+  mixed: 'mixed',
+};
 
 const STAGES = [
   { key: 'prepare', label: 'Preparing images' },
@@ -220,7 +228,9 @@ export default function PaperPage() {
           </Link>
           <h1>{paper.title}</h1>
           <p className="muted small">
-            Format: {paper.templateName || '—'} · {paper.images.length} image{paper.images.length === 1 ? '' : 's'}
+            Format: {paper.templateName || '—'}
+            {paper.language && paper.language !== 'en' && ` · ${languageOf(paper.language).native}`} · {paper.images.length} image
+            {paper.images.length === 1 ? '' : 's'}
             {paper.status === 'done' && ` · ${questionCount} question${questionCount === 1 ? '' : 's'}`} ·{' '}
             {formatDate(paper.createdAt)}
           </p>
@@ -315,7 +325,7 @@ export default function PaperPage() {
                 <div className="card-head">
                   <h3>Text read from the images</h3>
                   <span className="chips">
-                    <span className="chip">OCR: {paper.ocr?.method === 'groq-vision' ? 'Groq vision' : paper.ocr?.method || '—'}</span>
+                    <span className="chip">OCR: {OCR_METHODS[paper.ocr?.method] || paper.ocr?.method || '—'}</span>
                     <span className="chip">Structure: {paper.structureMethod === 'groq' ? 'Groq AI' : 'built-in rules'}</span>
                   </span>
                 </div>

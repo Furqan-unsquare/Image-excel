@@ -22,7 +22,7 @@
   --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06);
   --shadow: 0 1px 3px rgba(16, 24, 40, 0.08), 0 1px 2px rgba(16, 24, 40, 0.04);
   --shadow-lg: 0 12px 32px rgba(16, 24, 40, 0.16);
-  --font: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Nirmala UI', 'Noto Sans Devanagari', sans-serif;
   color-scheme: light;
 }
 
@@ -540,6 +540,54 @@ textarea::placeholder {
   border: 1px solid var(--border);
   color: var(--muted);
   white-space: nowrap;
+}
+.chip-lang.lang-hi,
+.chip-lang.lang-mr {
+  background: var(--accent-soft);
+  border-color: #bfe0cc;
+  color: var(--accent);
+}
+
+/* ---------- languages, words to check ---------- */
+.language-picker {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 2px 0 14px;
+}
+.language-picker .segmented button {
+  padding: 7px 14px;
+  font-size: 0.92rem;
+}
+.segmented .count {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--faint);
+}
+.segmented button.active .count {
+  background: var(--surface);
+  color: var(--accent);
+}
+.tips {
+  margin: 10px 0 4px;
+  padding-left: 18px;
+}
+.tips li + li {
+  margin-top: 3px;
+}
+input.needs-check,
+.needs-check {
+  background: var(--warn-soft);
+  border-color: #e3c25c;
+}
+.check-hint {
+  font-size: 0.78rem;
+  color: var(--warn);
 }
 .badge {
   display: inline-block;

@@ -6,9 +6,18 @@ import ExcelJS from 'exceljs';
 import { config, groqEnabled } from '../config.js';
 import { groqJSON } from './groq.js';
 import { cellText, clone, colLetter, hasBorder, pickStyle, styleSignature } from '../utils/excel.js';
-import { detectNumberStyle } from '../utils/numbering.js';
+import { detectNumberStyle, devaSeriesFor, NUMBER_STYLES } from '../utils/numbering.js';
 import { httpError } from '../utils/http.js';
 import { readDefaultFont } from '../utils/xlsxPatch.js';
+import {
+  detectLanguage,
+  LANGUAGE_DEFAULTS,
+  LANGUAGE_NAMES,
+  LANGUAGES,
+  LEGACY_DEVANAGARI_FONT,
+  toLatinDigits,
+  UNICODE_DEVANAGARI_FONT,
+} from '../utils/lang.js';
 
 const MAX_ROWS = 800;
 const MAX_COLS = 40;
@@ -16,27 +25,34 @@ const DEFAULT_COL_WIDTH = 8.43;
 
 export const ROLES = ['header', 'section', 'question', 'item', 'continuation', 'note', 'answer', 'table', 'other'];
 
-// "Q1.  Fill in…", "Que 4) …", "Question 2 - …", "Q. IV …"
-const QUESTION_RE = /^(\s*)(Q(?:ue(?:s(?:tion)?)?)?\s*\.?\s*(?:no\.?\s*)?)(\d{1,3}|[IVX]{1,5})(?![A-Za-z0-9])(\s*[.):\]\-–]*)(\s*)([\s\S]*)$/i;
-// "1.  The calendar…", "(a) …", "iv) …", "B. …", "6] …"
-const ITEM_RE = /^(\s*)(\(?)(\d{1,2}|[ivx]{1,4}|[IVX]{1,4}|[A-Za-z])(\s*(?:[.)\]]|:-?))(\s*)([\s\S]*)$/;
-// "[ 2 M]", "(5 Marks)", "3 marks", "[2M]"
-export const MARKS_RE = /^\s*(?:[[(]\s*\d+(?:\.\d+)?\s*(?:m|mk|mks|marks?|mark'?s)?\.?\s*[\])]|\d+(?:\.\d+)?\s*(?:m|mk|mks|marks?|mark'?s)\.?)\s*$/i;
-const BARE_NUMBER_RE = /^\s*\d+(?:\.\d+)?\s*$/;
-const ANSWER_RE = /^\s*ans(?:wer)?\s*[\].:)\-–]/i;
+// "Q1.  Fill in…", "Que 4) …", "Question 2 - …", "Q. IV …", "प्रश्न 1.", "प्र. १.", "प्र. १ ला)" (Marathi ordinal)
+const QUESTION_RE =
+  /^(\s*)(Q(?:ue(?:s(?:tion)?)?)?\s*\.?\s*(?:no\.?\s*)?|प्रश्न\s*(?:क्र(?:मांक)?\s*\.?\s*)?|प्र\s*\.\s*)([0-9\u0966-\u096F]{1,3}|[IVX]{1,5})(?![A-Za-z0-9\u0966-\u096F])((?:\s*(?:ला|रा|था|वा)(?![\u0900-\u097F]))?)(\s*[.):\]\-–]*)(\s*)([\s\S]*)$/i;
+// "1.  The calendar…", "(a) …", "iv) …", "B. …", "6] …", "१) …", "(अ) …", "क) …" — not "2.5 + 1"
+const ITEM_RE =
+  /^(\s*)(\(?)(\d{1,2}|[\u0966-\u096F]{1,2}|[ivx]{1,4}|[IVX]{1,4}|[A-Za-z]|[\u0904-\u0939][ंः]?)(\s*(?:\.(?![0-9])|[)\]]|:-?))(\s*)([\s\S]*)$/;
+// "[ 2 M]", "(5 Marks)", "3 marks", "[2M]", "(५ गुण)", "[2 अंक]"
+const NUM = '[0-9\u0966-\u096F]+(?:\\.[0-9\u0966-\u096F]+)?';
+const MARK_WORD = "(?:m|mk|mks|marks?|mark'?s|अंक|गुण)";
+export const MARKS_RE = new RegExp(`^\\s*(?:[[(]\\s*${NUM}\\s*${MARK_WORD}?\\.?\\s*[\\])]|${NUM}\\s*${MARK_WORD}\\.?)\\s*$`, 'i');
+const BARE_NUMBER_RE = new RegExp(`^\\s*${NUM}\\s*$`);
+const FIRST_NUMBER_RE = new RegExp(NUM);
+const ANSWER_RE = /^\s*(?:ans(?:wer)?\s*[\].:)\-–]|उत्तर\s*[:\-–.)\]])/i;
 const SUFFIX_RE = /(\s*(?::-|:–|:|–|-))\s*$/;
 
 function parseQuestion(text) {
   const m = QUESTION_RE.exec(text);
   if (!m) return null;
-  return { indent: m[1].length, prefix: m[2], token: m[3], punct: m[4].trim(), gap: m[5].length, rest: m[6] };
+  return { indent: m[1].length, prefix: m[2], token: m[3], ordinal: m[4], punct: m[5].trim(), gap: m[6].length, rest: m[7] };
 }
 
 function parseItem(text) {
   const m = ITEM_RE.exec(text);
   if (!m) return null;
-  return { indent: m[1].length, prefix: m[2], token: m[3], punct: m[4].trim(), gap: m[5].length, rest: m[6] };
+  return { indent: m[1].length, prefix: m[2], token: m[3], ordinal: '', punct: m[4].trim(), gap: m[5].length, rest: m[6] };
 }
+
+const marksValue = (text) => Number(toLatinDigits((FIRST_NUMBER_RE.exec(text) || [])[0] || ''));
 
 function mode(values, fallback = null) {
   const counts = new Map();
@@ -254,10 +270,11 @@ async function labelWithLlm(rows) {
         content:
           'You label the rows of an Excel exam question paper template. Reply with JSON only: {"rows":[{"row":<number>,"role":<role>}]} with one entry per row listed.\n' +
           'Roles:\n' +
-          '- header: school name, exam name, subject, class, date, time, total marks lines at the top.\n' +
-          '- section: subject or part titles inside the paper (e.g. HISTORY, Section A, Part II).\n' +
-          '- question: a main question heading / instruction (e.g. "Q1. Fill in the blanks", "I. Answer the following"), usually bold, often with marks.\n' +
-          '- item: a numbered sub-question under a heading ("1. …", "a) …").\n' +
+          'The paper can be in English, Hindi or Marathi.\n' +
+          '- header: school name, exam name, subject, class, date, time, total marks lines at the top (also विषय, कक्षा, इयत्ता, गुण, पूर्णांक, समय, वेळ).\n' +
+          '- section: subject or part titles inside the paper (e.g. HISTORY, Section A, Part II, विभाग अ).\n' +
+          '- question: a main question heading / instruction (e.g. "Q1. Fill in the blanks", "I. Answer the following", "प्रश्न 1. रिक्त स्थान भरिए।", "प्र. १. रिकाम्या जागा भरा."), usually bold, often with marks.\n' +
+          '- item: a numbered sub-question under a heading ("1. …", "a) …", "(अ) …", "१) …").\n' +
           '- continuation: a line that continues the previous sub-question text.\n' +
           '- note: extra text under a heading that is not a numbered sub-question (word bank, instructions).\n' +
           '- answer: an answer line.\n' +
@@ -285,13 +302,25 @@ async function labelWithLlm(rows) {
   });
 }
 
+// Devanagari letters only make sense as a series (इ is the 3rd vowel but the 5th of अ ब स द इ).
+function numberStyleOf(tokens) {
+  const series = devaSeriesFor(tokens);
+  const styles = tokens.map((t) => {
+    const style = detectNumberStyle(t);
+    return series && style.startsWith('deva-') && style !== 'deva-digits' ? series : style;
+  });
+  return mode(styles, 'arabic');
+}
+
 function numberFormatOf(parsedList, fallback) {
   if (!parsedList.length) return fallback;
   const prefix = mode(parsedList.map((p) => p.prefix), '');
   const punct = mode(parsedList.map((p) => p.punct), '.');
+  // "प्र. १ ला)": the ordinal after the number changes with it (ला, रा, था, वा) -> {o}.
+  const ordinal = mode(parsedList.map((p) => (p.ordinal ? p.ordinal.replace(/\S+$/, '{o}') : '')), '');
   return {
-    numberFormat: `${prefix}{n}${punct}`,
-    numberStyle: mode(parsedList.map((p) => detectNumberStyle(p.token)), 'arabic'),
+    numberFormat: `${prefix}{n}${ordinal}${punct}`,
+    numberStyle: numberStyleOf(parsedList.map((p) => p.token)),
     indent: mode(parsedList.map((p) => p.indent), 0),
     gap: Math.max(1, mode(parsedList.filter((p) => p.rest.trim()).map((p) => p.gap), 2)),
   };
@@ -301,7 +330,7 @@ function leadingSpaces(text) {
   return (/^\s*/.exec(text) || [''])[0].length;
 }
 
-export const PROFILE_VERSION = 2;
+export const PROFILE_VERSION = 3;
 
 // What to do when a photo has no marks for a question, learned from the format:
 // the same marks on every question ("[ 2 M]" everywhere) -> 'fixed', marks equal to
@@ -312,7 +341,7 @@ export function marksRule(questions, infos) {
     .map((q) => {
       const next = infos.find((i) => i.row > q.row && (i.role === 'question' || i.role === 'section'));
       const itemCount = infos.filter((i) => i.role === 'item' && i.row > q.row && (!next || i.row < next.row)).length;
-      return { value: Number((/\d+(?:\.\d+)?/.exec(q.marksCell.text) || [])[0]), itemCount };
+      return { value: marksValue(q.marksCell.text), itemCount };
     })
     .filter((s) => s.value > 0);
   if (!samples.length) return { whenMissing: 'none', defaultValue: 2 };
@@ -324,7 +353,17 @@ export function marksRule(questions, infos) {
   return { whenMissing, defaultValue };
 }
 
-function buildProfile(ws, rows, infos, warnings, defaultFont) {
+// Hindi or Marathi digits (१२३) when the format writes numbers that way.
+function digitsOf(rows, language) {
+  const text = rows.flatMap((r) => r.cells.map((c) => c.text)).join(' ');
+  const deva = (text.match(/[\u0966-\u096F]/g) || []).length;
+  const latin = (text.match(/[0-9]/g) || []).length;
+  if (!deva && !latin) return LANGUAGE_DEFAULTS[language].digits;
+  return deva > latin ? 'devanagari' : 'latin';
+}
+
+function buildProfile(ws, rows, infos, warnings, defaultFont, language) {
+  const lang = LANGUAGE_DEFAULTS[language];
   const base = baseFontOf(rows);
   const baseStyle = { font: defaultFont ? clone(defaultFont) : { name: base.name, size: base.size } };
   const byRole = (role) => infos.filter((i) => i.role === role && i.primary);
@@ -342,10 +381,19 @@ function buildProfile(ws, rows, infos, warnings, defaultFont) {
 
   // ---- questions + marks --------------------------------------------------
   const questions = byRole('question');
-  if (!questions.length) warnings.push('No question headings (like "Q1. Fill in the blanks") were found, so a default layout is used for questions.');
+  if (!questions.length) {
+    warnings.push(
+      `No question headings (like ${language === 'en' ? '"Q1. Fill in the blanks"' : '"प्रश्न 1." or "प्र. १."'}) were found, so a default layout is used for questions.`,
+    );
+  }
   const qCol = mode(questions.map((i) => i.primary.col), 1);
   const qParsed = questions.map((i) => i.parsed).filter(Boolean);
-  const qNumber = numberFormatOf(qParsed, { numberFormat: 'Q{n}.', numberStyle: 'arabic', indent: 0, gap: 3 });
+  const qNumber = numberFormatOf(qParsed, {
+    numberFormat: lang.questionFormat,
+    numberStyle: lang.digits === 'devanagari' ? 'deva-digits' : 'arabic',
+    indent: 0,
+    gap: 3,
+  });
   const qSuffix = mode(
     qParsed.map((p) => {
       const m = SUFFIX_RE.exec(p.rest.replace(/\s+$/, ''));
@@ -362,8 +410,8 @@ function buildProfile(ws, rows, infos, warnings, defaultFont) {
   const marks = {
     col: marksCol,
     style: modeStyle(marksCells.filter((c) => c.col === marksCol), { font: { ...baseStyle.font, bold: true } }),
-    format: mode(marksCells.map((c) => c.text.trim().replace(/\d+(?:\.\d+)?/, '{m}')), '[{m} M]'),
-    inlineFormat: ' ({m} Marks)',
+    format: mode(marksCells.map((c) => c.text.trim().replace(FIRST_NUMBER_RE, '{m}')), language === 'en' ? '[{m} M]' : lang.inlineMarks.trim()),
+    inlineFormat: lang.inlineMarks,
   };
   if (marks.format && !marks.format.includes('{m}')) marks.format = '[{m} M]';
   Object.assign(marks, marksRule(questions, infos));
@@ -373,8 +421,8 @@ function buildProfile(ws, rows, infos, warnings, defaultFont) {
   const iCol = mode(items.map((i) => i.primary.col), qCol);
   const iParsed = items.map((i) => i.parsed).filter(Boolean);
   const iNumber = numberFormatOf(iParsed, {
-    numberFormat: '{n}.',
-    numberStyle: 'arabic',
+    numberFormat: language === 'en' ? '{n}.' : '{n})',
+    numberStyle: lang.digits === 'devanagari' ? 'deva-digits' : 'arabic',
     indent: qNumber.indent + 2,
     gap: 3,
   });
@@ -408,7 +456,7 @@ function buildProfile(ws, rows, infos, warnings, defaultFont) {
     col: answers.length ? mode(answers.map((i) => i.primary.col)) : continuation.col,
     style: answerStyle,
     indent: answers.length ? mode(answers.map((i) => leadingSpaces(i.primary.text)), 0) : continuation.indent,
-    prefix: 'Ans: ',
+    prefix: lang.answerPrefix,
   };
 
   // ---- sections ----------------------------------------------------------
@@ -498,6 +546,11 @@ function buildProfile(ws, rows, infos, warnings, defaultFont) {
 
   return {
     version: PROFILE_VERSION,
+    language,
+    // Numbers in marks and header values: 'latin' (1 2 3) or 'devanagari' (१ २ ३).
+    digits: digitsOf(rows, language),
+    // Multiple-choice options under a sub-question: (a) (b) / (क) (ख) / (१) (२).
+    options: { numberStyle: lang.optionStyle, format: '({n})' },
     sheetName: ws.name,
     baseFont: base,
     defaultFont: baseStyle.font,
@@ -529,7 +582,29 @@ function buildProfile(ws, rows, infos, warnings, defaultFont) {
   };
 }
 
-export async function analyzeTemplate(buffer, { forceLlm = false, allowLlm = true } = {}) {
+// Old Hindi/Marathi fonts (Kruti Dev, Shree-Lipi …) store Devanagari as English letters.
+function legacyFontOf(rows) {
+  const names = rows.flatMap((r) => r.cells.filter((c) => c.text.trim()).map((c) => c.style.font?.name || ''));
+  return names.find((n) => LEGACY_DEVANAGARI_FONT.test(n)) || null;
+}
+
+// Text the app writes in a legacy-font format is Unicode, so those cells get a Unicode Devanagari font.
+function replaceLegacyFonts(profile) {
+  const fix = (style) => {
+    if (style?.font?.name && LEGACY_DEVANAGARI_FONT.test(style.font.name)) style.font = { ...style.font, name: UNICODE_DEVANAGARI_FONT };
+  };
+  for (const key of ['section', 'question', 'marks', 'item', 'continuation', 'note', 'answer']) fix(profile[key]?.style);
+  for (const key of ['headerStyle', 'firstRowStyle', 'cellStyle']) fix(profile.table?.[key]);
+  if (profile.defaultFont?.name && LEGACY_DEVANAGARI_FONT.test(profile.defaultFont.name)) {
+    profile.defaultFont = { ...profile.defaultFont, name: UNICODE_DEVANAGARI_FONT };
+  }
+}
+
+/**
+ * @param {Buffer} buffer the .xlsx file
+ * @param {{ forceLlm?: boolean, allowLlm?: boolean, language?: 'auto'|'en'|'hi'|'mr' }} options
+ */
+export async function analyzeTemplate(buffer, { forceLlm = false, allowLlm = true, language = 'auto' } = {}) {
   const wb = new ExcelJS.Workbook();
   try {
     await wb.xlsx.load(buffer);
@@ -559,7 +634,24 @@ export async function analyzeTemplate(buffer, { forceLlm = false, allowLlm = tru
     warnings.push('GROQ_API_KEY is not set, so built-in rules were used.');
   }
 
-  const profile = buildProfile(ws, rows, infos, warnings, defaultFont);
+  const legacyFont = legacyFontOf(rows);
+  const detected = detectLanguage(rows.flatMap((r) => r.cells.map((c) => c.text)).join('\n'));
+  let lang = LANGUAGES.includes(language) ? language : detected.language;
+  if (legacyFont && !LANGUAGES.includes(language) && lang === 'en') lang = 'hi';
+
+  const profile = buildProfile(ws, rows, infos, warnings, defaultFont, lang);
+  if (legacyFont) {
+    replaceLegacyFonts(profile);
+    profile.legacyFont = legacyFont;
+    warnings.push(
+      `This format uses the font "${legacyFont}", an old Hindi/Marathi font that stores letters as English characters. ` +
+        `New questions are written in ${UNICODE_DEVANAGARI_FONT} so they show correctly, but header lines typed in ${legacyFont} cannot be filled in automatically. ` +
+        'For the best result, save the format with a Unicode font (Nirmala UI, Mangal or Kokila) and upload it again.',
+    );
+  }
+  if (LANGUAGES.includes(language) && language !== detected.language && detected.sure) {
+    warnings.push(`You chose ${LANGUAGE_NAMES[language]}, but this file looks ${LANGUAGE_NAMES[detected.language]}. Change the language below if that is wrong.`);
+  }
   return { profile, method, warnings, rows: infos.map((i) => ({ row: i.row, role: i.role })) };
 }
 
@@ -572,7 +664,22 @@ export function mergeProfileSettings(profile, settings = {}) {
   };
   const colOr = (v, fallback) => (v === null ? null : intOr(v, fallback, 1, MAX_COLS));
   const str = (v, fallback, max = 40) => (typeof v === 'string' ? v.slice(0, max) : fallback);
-  const styles = ['arabic', 'alpha-lower', 'alpha-upper', 'roman-lower', 'roman-upper'];
+  const styles = NUMBER_STYLES;
+
+  // Switching the language also switches the printed words that still have that language's default.
+  if (LANGUAGES.includes(settings.language) && settings.language !== (next.language || 'en')) {
+    const from = LANGUAGE_DEFAULTS[next.language || 'en'];
+    const to = LANGUAGE_DEFAULTS[settings.language];
+    if (!next.answer.prefix || next.answer.prefix === from.answerPrefix) next.answer.prefix = to.answerPrefix;
+    if (!next.marks.inlineFormat || next.marks.inlineFormat === from.inlineMarks) next.marks.inlineFormat = to.inlineMarks;
+    if (!next.options || next.options.numberStyle === from.optionStyle) next.options = { format: '({n})', ...next.options, numberStyle: to.optionStyle };
+    next.language = settings.language;
+  }
+  if (settings.options && styles.includes(settings.options.numberStyle)) {
+    next.options = { format: '({n})', ...next.options, numberStyle: settings.options.numberStyle };
+  }
+  if (['latin', 'devanagari'].includes(settings.digits)) next.digits = settings.digits;
+  if (typeof settings.answerPrefix === 'string') next.answer.prefix = settings.answerPrefix.slice(0, 20);
 
   if (settings.question) {
     const s = settings.question;

@@ -107,6 +107,8 @@ If Groq renames or retires a model, change the two model variables. No code chan
 
  Photos ──► sharp (rotate, resize, split tall images at blank rows)
         ──► OCR: Groq vision model  (fallback: Tesseract)
+            Hindi/Marathi: Tesseract reads printed pages first and its draft
+            guides the vision model; words it can't confirm are flagged
         ──► Structure: Groq text model → JSON  (fallback: rule-based parser)
             { sections: [{ title, questions: [{ number, text, marks, note,
                                                items: [{ label, text, options, answer }],
@@ -134,13 +136,35 @@ For unusual layouts, tick **"Use AI to detect the layout"** when uploading, or u
 
 Everything that was detected can be changed on the **Formats → (format)** page. The **Sample output** view shows the effect immediately, and changes are saved once and used for every paper.
 
+### Hindi and Marathi papers
+
+Every format has a language: **English**, **हिंदी Hindi** or **मराठी Marathi**. It is detected from the file when you upload it, and you can change it in the upload dialog or on the format page. Photos are read in the language of the format they're converted with, so **a Hindi paper needs a Hindi format, and a Marathi paper needs a Marathi format**. On **New paper**, choose the language first. If no format exists for that language yet, the page says so and offers the upload button.
+
+- **Headings, labels and marks:** `प्रश्न 1.`, `प्र. १.`, `प्र. १ ला)`; `(अ) (ब) (स)`, `अ) आ) इ)`, `(क) (ख) (ग)`, `१)`; `(2 अंक)`, `(५ गुण)`. The format's own style is reused, including १२३ digits.
+- **Header values:** `विषय`, `कक्षा` / `इयत्ता`, `पूर्णांक` / `गुण`, `समय` / `वेळ` and `दिनांक` are filled in from the photo.
+- **Answer blanks:** added for रिक्त स्थान / रिकाम्या जागा / गाळलेल्या जागा, सही या गलत / चूक की बरोबर, and एक शब्द / एका शब्दात questions.
+- **Reading accuracy:**
+  - On printed pages, the free local OCR (Tesseract) reads the page first and its draft guides the AI. In tests on printed pages, about 99% of words came out exactly right.
+  - Without the draft, the AI sometimes swaps a Marathi word for a similar one (e.g. करावा → करतो).
+  - Words the two readers disagree on are highlighted in **Edit questions**.
+  - Handwriting is read by the AI alone and is less accurate, so check it against the photo.
+- **Fonts:** use a Unicode font (Nirmala UI, Mangal, Kokila) in the format. Formats typed in old fonts like Kruti Dev or Shree-Lipi still work: new text is written in Nirmala UI, but their header lines can't be filled in automatically.
+
+### Maths papers
+
+- **Notation:** fractions (`3/4`), powers (`5²`, `10³`), roots (`√49`), `×`, `÷`, `π`, `°`, `△` and units are copied exactly as plain text. Nothing is ever solved.
+- **Vertical sums:** become one line, e.g. `345 + 127 = ______`.
+- **Answer blanks:** sums ending in `=` get a blank.
+- **Match the following** becomes a two-column table.
+- **Diagrams and figures are left out for now.** A warning names the questions that had one, so you can add the figure in Excel.
+
 ---
 
 ## Tips for good results
 
 - Use well‑lit photos taken straight on, or screenshots. One page per image is best, but long stitched screenshots work too: they are split automatically.
 - Add pages in order. Questions that continue onto the next page are joined.
-- Diagrams and pictures can't be copied into Excel. A note like `[Picture: human body diagram]` is added where they were.
+- Diagrams and pictures aren't copied into Excel. A warning after converting names the questions that had one.
 - HEIC photos (iPhone) aren't supported, so share them as JPG. Old `.xls` formats must be saved as `.xlsx`.
 - Notebook pages with answers: tick **"print answers"** to get an answer key, or leave it off for a clean question paper with answer blanks.
 - On a phone, use **Take photo** to open the camera directly. The app works on phones and tablets, with navigation at the bottom of the screen.
@@ -161,7 +185,8 @@ server/
     routes/papers.js          create (upload images) / status / preview / edit / download / run again
     services/templateAnalyzer.js   learns the layout of an uploaded Excel
     services/excelGenerator.js     writes questions into the format (exceljs)
-    services/ocr.js                image prep + Groq vision OCR + Tesseract fallback
+    services/ocr.js                image prep + Groq vision OCR + Tesseract fallback / Hindi-Marathi letter check
+    utils/lang.js                  languages, Devanagari digits, Hindi vs Marathi detection
     services/paperParser.js        Groq JSON structuring + rule-based fallback + header filling
     services/paperProcessor.js     background job with progress (incl. Groq rate-limit waits)
     services/sheetRender.js        worksheet → JSON for the browser preview
@@ -176,11 +201,11 @@ client/
 | Method | Path | |
 |---|---|---|
 | GET | `/api/health` | status, whether Groq is configured |
-| GET / POST | `/api/templates` | list / upload (`multipart: file, name, useAi`) |
+| GET / POST | `/api/templates` | list / upload (`multipart: file, name, useAi, language` = `en`/`hi`/`mr`, omit to detect) |
 | GET / PATCH / DELETE | `/api/templates/:id` | get / rename + change settings / delete |
 | GET | `/api/templates/:id/preview` · `/sample-preview` · `/file` | uploaded sheet · demo output · original file |
 | POST | `/api/templates/:id/reanalyze` | detect layout again (`{ useAi }`) |
-| GET / POST | `/api/papers` | list / create (`multipart: templateId, images[], includeAnswers`) |
+| GET / POST | `/api/papers` | list / create (`multipart: templateId, images[], includeAnswers`; read in the format's language) |
 | GET / DELETE | `/api/papers/:id` | status, progress, content, OCR text / delete |
 | GET | `/api/papers/:id/preview` · `/download` · `/images/:n` | preview model · .xlsx · source image |
 | PUT | `/api/papers/:id/content` | save edited questions and rebuild the Excel |

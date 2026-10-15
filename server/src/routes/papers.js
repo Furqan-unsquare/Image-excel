@@ -28,6 +28,7 @@ const paperDto = (p, { full = false } = {}) => ({
   title: p.title,
   templateId: p.template ? String(p.template) : null,
   templateName: p.templateName,
+  language: p.language || 'en',
   status: p.status,
   progress: p.progress,
   error: p.error,
@@ -43,6 +44,7 @@ const paperDto = (p, { full = false } = {}) => ({
         content: p.content,
         ocr: { method: p.ocr?.method || '', text: p.ocr?.text || '' },
         structureMethod: p.structureMethod,
+        review: { words: p.review?.words || [] },
       }
     : {}),
 });
@@ -78,6 +80,7 @@ router.post('/', upload.array('images', config.maxImages), async (req, res) => {
     title: String(req.body?.title || '').trim() || 'Question paper',
     template: template._id,
     templateName: template.name,
+    language: template.profile?.language || 'en',
     status: 'processing',
     progress: { stage: 'queued', message: 'Queued', percent: 2 },
     images: prepared.map(({ file, image }) => ({
@@ -159,6 +162,7 @@ router.post('/:id/retry', async (req, res) => {
     if (!t) throw httpError(404, 'Format not found');
     p.template = t._id;
     p.templateName = t.name;
+    p.language = t.profile?.language || 'en';
   }
   p.status = 'processing';
   p.error = '';

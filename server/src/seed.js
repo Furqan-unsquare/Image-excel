@@ -5,7 +5,8 @@ import { Template } from './models/Template.js';
 import { analyzeTemplate, PROFILE_VERSION } from './services/templateAnalyzer.js';
 
 // Formats saved by an older version get the newer settings (marks rule, answer
-// blanks) filled in from their file. Settings the user changed are kept as they are.
+// blanks, language, digits, option labels) filled in from their file. Settings the
+// user changed are kept as they are.
 export async function upgradeTemplates() {
   const outdated = await Template.find({
     $or: [{ 'profile.version': { $lt: PROFILE_VERSION } }, { 'profile.version': { $exists: false } }],
@@ -17,6 +18,10 @@ export async function upgradeTemplates() {
         ...t.profile,
         version: PROFILE_VERSION,
         answerLines: t.profile.answerLines ?? true,
+        language: t.profile.language ?? profile.language,
+        digits: t.profile.digits ?? profile.digits,
+        options: t.profile.options ?? profile.options,
+        ...(profile.legacyFont && !t.profile.legacyFont ? { legacyFont: profile.legacyFont } : {}),
         marks: {
           ...t.profile.marks,
           whenMissing: t.profile.marks?.whenMissing ?? profile.marks.whenMissing,

@@ -3,8 +3,9 @@
 // columns and spacing learned by templateAnalyzer.js.
 import ExcelJS from 'exceljs';
 import { applyStyle, colLetter } from '../utils/excel.js';
-import { formatNumber, labelToNumber, toAlpha } from '../utils/numbering.js';
+import { formatNumber, labelNumbers, labelToNumber, marathiOrdinal } from '../utils/numbering.js';
 import { readDefaultFont, restoreDefaultFont } from '../utils/xlsxPatch.js';
+import { LANGUAGE_DEFAULTS, toDevanagariDigits } from '../utils/lang.js';
 
 function removeOtherSheets(wb, keep) {
   for (const ws of [...wb.worksheets]) {
@@ -43,6 +44,17 @@ function applyHeader(ws, profile, headerLines) {
   }
 }
 
+// Width of a line in average Latin characters: Devanagari matras and viramas add no
+// width of their own and the letters are a little wider than Latin ones.
+export function textWidth(text) {
+  let width = 0;
+  for (const ch of String(text || '')) {
+    if (/\p{M}/u.test(ch)) continue;
+    width += ch >= '\u0900' && ch <= '\u097F' ? 1.15 : 1;
+  }
+  return width;
+}
+
 function wrapWords(text, firstCap, restCap) {
   const words = String(text || '').trim().split(/\s+/).filter(Boolean);
   const lines = [];
@@ -50,7 +62,7 @@ function wrapWords(text, firstCap, restCap) {
   let cap = Math.max(10, firstCap);
   for (const word of words) {
     const candidate = cur ? `${cur} ${word}` : word;
-    if (!cur || candidate.length <= cap) {
+    if (!cur || textWidth(candidate) <= cap) {
       cur = candidate;
     } else {
       lines.push(cur);
@@ -121,20 +133,23 @@ class SheetWriter {
 
   // Writes `prefix + body`, wrapping long text onto continuation rows.
   putWrapped(row, { col, prefix, body, style, contCol, contIndent, contStyle, height }) {
-    const lines = wrapWords(body, this.capacity(col) - prefix.length, this.capacity(contCol) - contIndent);
+    const lines = wrapWords(body, this.capacity(col) - textWidth(prefix), this.capacity(contCol) - contIndent);
     this.put(row, col, prefix + lines[0], style, height);
     lines.slice(1).forEach((line, i) => this.put(row + 1 + i, contCol, ' '.repeat(contIndent) + line, contStyle));
     return row + lines.length - 1;
   }
 }
 
-// Question types where students write a short answer on the paper itself.
+// Question types where students write a short answer on the paper itself (English, Hindi, Marathi).
 const KINDS = [
-  ['fullform', /full[\s-]*forms?|abbreviat|expand the/i],
-  ['fill', /fill\s*(in|up)|blanks?\b/i],
-  ['truefalse', /true\s*(or|\/|and)\s*false|right\s*or\s*wrong|correct\s*or\s*(incorrect|wrong)|yes\s*or\s*no/i],
-  ['oneword', /one[\s-]*word|single[\s-]*word/i],
-  ['long', /define|explain|describe|answer\s+in\s+(brief|detail|short)|long\s+answer|why\b|differen/i],
+  ['fullform', /full[\s-]*forms?|abbreviat|expand the|पूर्ण\s*रूप|पूरा\s*नाम|विस्तारित\s*रूप/i],
+  ['fill', /fill\s*(in|up)|blanks?\b|रिक्त\s*स्थान|खाली\s*जगह|रिकाम्या\s*जागा|रिकामी\s*जागा|गाळलेल्या\s*जागा|गाळलेले\s*शब्द/i],
+  [
+    'truefalse',
+    /true\s*(or|\/|and)\s*false|right\s*or\s*wrong|correct\s*or\s*(incorrect|wrong)|yes\s*or\s*no|सही\s*(या|अथवा|\/)\s*गलत|सत्य\s*(या|अथवा|की|\/)\s*असत्य|चूक\s*(की|किंवा|\/)\s*बरोबर|बरोबर\s*(की|किंवा|\/)\s*चूक/i,
+  ],
+  ['oneword', /one[\s-]*word|single[\s-]*word|एक\s*शब्द|एका\s*शब्दात/i],
+  ['long', /define|explain|describe|answer\s+in\s+(brief|detail|short)|long\s+answer|why\b|differen|स्पष्ट\s*कीजिए|समझाइए|वर्णन|स्पष्ट\s*करा|सविस्तर|फरक/i],
 ];
 const questionKind = (text) => KINDS.find(([, re]) => re.test(text || ''))?.[0] || 'other';
 
@@ -157,6 +172,12 @@ export function writeBody(ws, profile, content, { includeAnswers = false } = {})
   const w = new SheetWriter(ws, p);
   const blank = (text) => String(text || '').replace(/_{3,}/g, p.blank || '______________').trim();
   const sp = p.spacing;
+  const words = LANGUAGE_DEFAULTS[p.language] || LANGUAGE_DEFAULTS.en;
+  // Marks are stored as 0-9; formats that write १२३ get them that way.
+  const digits = (v) => (p.digits === 'devanagari' ? toDevanagariDigits(v) : v);
+  const numberLabel = (format, n, style) => format.replace('{n}', formatNumber(n, style)).replace('{o}', marathiOrdinal(n));
+  const answerPrefix = p.answer.prefix || words.answerPrefix;
+  const option = { style: p.options?.numberStyle || words.optionStyle, format: p.options?.format || '({n})' };
 
   for (const section of content.sections || []) {
     let justAfterSection = false;
@@ -175,11 +196,11 @@ export function writeBody(ws, profile, content, { includeAnswers = false } = {})
       if (hasHeading) {
         const n = labelToNumber(q.number) ?? qCounter + 1;
         qCounter = n;
-        const label = p.question.numberFormat.replace('{n}', formatNumber(n, p.question.numberStyle));
+        const label = numberLabel(p.question.numberFormat, n, p.question.numberStyle);
         let text = blank(q.text);
-        if (p.question.suffix && text && !/[?!:\-–]$/.test(text)) text = text.replace(/[\s.]+$/, '') + p.question.suffix;
-        const marks = numericMarks(q.marks);
-        if (marks && !p.marks.col) text += p.marks.inlineFormat.replace('{m}', marks);
+        if (p.question.suffix && text && !/[?!:\-–]$/.test(text)) text = text.replace(/[\s.।]+$/, '') + p.question.suffix;
+        const marks = digits(numericMarks(q.marks));
+        if (marks && !p.marks.col) text += (p.marks.inlineFormat || words.inlineMarks).replace('{m}', marks);
 
         const prefix = ' '.repeat(p.question.indent) + label + ' '.repeat(p.question.gap);
         const row = w.nextRow(justAfterSection ? sp.afterSection : sp.betweenQuestions);
@@ -237,16 +258,21 @@ export function writeBody(ws, profile, content, { includeAnswers = false } = {})
       let iCounter = 0;
       const blankMode = blankStyle(q, p, includeAnswers);
       const blankText = p.blank || '______________';
+      const itemNumbers = labelNumbers((q.items || []).map((i) => i.label));
       (q.items || []).forEach((item, idx) => {
-        const n = labelToNumber(item.label) ?? iCounter + 1;
+        const n = itemNumbers[idx] ?? iCounter + 1;
         iCounter = n;
-        const label = p.item.numberFormat.replace('{n}', formatNumber(n, p.item.numberStyle));
+        const label = numberLabel(p.item.numberFormat, n, p.item.numberStyle);
         const prefix = ' '.repeat(p.item.indent) + label + ' '.repeat(p.item.gap);
         const row = w.nextRow(idx === 0 ? childGap : sp.betweenItems);
         const cont = { contCol: p.continuation.col, contIndent: p.continuation.indent, contStyle: p.continuation.style };
         let body = blank(item.text);
+        const shownAnswer = includeAnswers && String(item.answer || '').trim();
         if (blankMode && body && !/_{3,}/.test(body)) {
           body = blankMode === 'equals' ? `${body.replace(/\s*[:=-]+$/, '')} = ${blankText}` : `${body} ${blankText}`;
+        } else if (!blankMode && p.answerLines !== false && !shownAnswer && !item.options?.length && /=\s*$/.test(body)) {
+          // Maths: "45 + 23 =" gets a place for the answer.
+          body = `${body.replace(/\s+$/, '')} ${blankText}`;
         }
         w.putWrapped(row, { col: p.item.col, prefix, body, style: p.item.style, ...cont });
 
@@ -256,22 +282,21 @@ export function writeBody(ws, profile, content, { includeAnswers = false } = {})
           const cap = w.capacity(cont.contCol) - cont.contIndent;
           const lines = [];
           options.forEach((o, i) => {
-            const part = `(${toAlpha(i + 1).toLowerCase()}) ${o}`;
+            const part = `${option.format.replace('{n}', formatNumber(i + 1, option.style))} ${o}`;
             const last = lines[lines.length - 1];
-            if (last && last.length + 6 + part.length <= cap) lines[lines.length - 1] = `${last}      ${part}`;
+            if (last && textWidth(last) + 6 + textWidth(part) <= cap) lines[lines.length - 1] = `${last}      ${part}`;
             else lines.push(part);
           });
           lines.forEach((line) => w.put(w.last + 1, cont.contCol, ' '.repeat(cont.contIndent) + line, cont.contStyle));
         }
-        const answer = String(item.answer || '').trim();
-        if (includeAnswers && answer) {
+        if (shownAnswer) {
           w.putWrapped(w.last + 1, {
             col: p.answer.col,
-            prefix: ' '.repeat(p.answer.indent) + (p.answer.prefix || 'Ans: '),
-            body: answer,
+            prefix: ' '.repeat(p.answer.indent) + answerPrefix,
+            body: shownAnswer,
             style: p.answer.style,
             contCol: p.answer.col,
-            contIndent: p.answer.indent + (p.answer.prefix || 'Ans: ').length,
+            contIndent: p.answer.indent + answerPrefix.length,
             contStyle: p.answer.style,
           });
         }

@@ -8,6 +8,8 @@ const PaperSchema = new Schema(
     title: { type: String, default: 'Question paper', trim: true },
     template: { type: Schema.Types.ObjectId, ref: 'Template', required: true },
     templateName: { type: String, default: '' },
+    // Language the photos were read in (the format's language): en | hi | mr
+    language: { type: String, enum: ['en', 'hi', 'mr'], default: 'en' },
 
     status: { type: String, enum: ['processing', 'done', 'failed'], default: 'processing', index: true },
     progress: {
@@ -28,6 +30,10 @@ const PaperSchema = new Schema(
       text: { type: String, default: '' },
     },
     structureMethod: { type: String, default: '' }, // groq | rules
+    // Hindi/Marathi words the letter-check could not confirm: [{ word, alt }] (alt = other reading)
+    review: {
+      words: { type: [{ _id: false, word: String, alt: String }], default: [] },
+    },
     // { meta, header: [{address, text}], sections: [{ title, questions: [...] }] }
     content: { type: Schema.Types.Mixed, default: null },
 

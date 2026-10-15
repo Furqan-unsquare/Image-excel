@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowDown, ArrowUp, ListOrdered, LoaderCircle, Plus, Save, Table2, Trash2, Undo2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, ListOrdered, LoaderCircle, Plus, Save, Table2, Trash2, TriangleAlert, Undo2 } from 'lucide-react';
 
 // Client-only keys keep React rows stable while items are added, moved or removed.
 // The server ignores unknown fields, so they never reach the database.
@@ -23,6 +23,29 @@ function withKeys(content) {
   return c;
 }
 
+// Hindi/Marathi words the letter-check could not confirm, found in one field's text.
+function wordsIn(text, review) {
+  if (!review?.length || !text) return [];
+  const words = new Set(String(text).split(/[^\u0900-\u0963\u0966-\u097F]+/));
+  return review.filter((w) => words.has(w.word));
+}
+
+function CheckHint({ words }) {
+  if (!words.length) return null;
+  return (
+    <div className="check-hint">
+      Check:{' '}
+      {words.map((w, i) => (
+        <span key={w.word}>
+          {i > 0 && ', '}
+          <strong>{w.word}</strong>
+          {w.alt && <span className="muted"> (or {w.alt}?)</span>}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function moveInArray(list, index, delta) {
   const target = index + delta;
   if (target < 0 || target >= list.length) return;
@@ -30,9 +53,11 @@ function moveInArray(list, index, delta) {
   list.splice(target, 0, item);
 }
 
-function ItemRow({ item, index, onChange, onRemove }) {
+function ItemRow({ item, index, onChange, onRemove, review }) {
   const [showExtra, setShowExtra] = useState(Boolean(item.options?.length || item.answer));
   const [optionsText, setOptionsText] = useState((item.options || []).join(' / '));
+  const check = wordsIn(item.text, review);
+  const checkOptions = wordsIn(optionsText, review);
   return (
     <div className="item-row">
       <input
@@ -44,14 +69,17 @@ function ItemRow({ item, index, onChange, onRemove }) {
       />
       <div className="item-main">
         <input
+          className={check.length ? 'needs-check' : ''}
           value={item.text}
           onChange={(e) => onChange({ ...item, text: e.target.value })}
           placeholder="Sub-question text (use ______ for blanks)"
           aria-label="Sub-question text"
         />
+        <CheckHint words={check} />
         {showExtra ? (
           <div className="item-extra">
             <input
+              className={checkOptions.length ? 'needs-check' : ''}
               value={optionsText}
               onChange={(e) => {
                 setOptionsText(e.target.value);
@@ -137,6 +165,8 @@ export default function PaperEditor({ paper, onSave, saving }) {
 
   const { content } = draft;
   const header = content.header || [];
+  const review = paper.review?.words || [];
+  const reviewLeft = review.filter((w) => JSON.stringify(content).includes(w.word));
   const hasAnswers = content.sections.some((s) => s.questions.some((q) => q.items?.some((i) => i.answer)));
   const questionCount = content.sections.reduce((n, s) => n + s.questions.length, 0);
 
@@ -155,6 +185,20 @@ export default function PaperEditor({ paper, onSave, saving }) {
 
   return (
     <div className="editor">
+      {reviewLeft.length > 0 && (
+        <div className="alert alert-warn">
+          <TriangleAlert size={18} />
+          <div>
+            <strong>
+              {reviewLeft.length} word{reviewLeft.length > 1 ? 's' : ''} to check.
+            </strong>{' '}
+            The letter-check could not confirm {reviewLeft.length > 1 ? 'these words' : 'this word'}, so{' '}
+            {reviewLeft.length > 1 ? 'they are' : 'it is'} highlighted below. Compare with the photo and fix if needed:{' '}
+            {reviewLeft.map((w) => w.word).join(', ')}
+          </div>
+        </div>
+      )}
+
       <div className="card">
         <div className="card-head">
           <h3>Paper details</h3>
@@ -179,7 +223,12 @@ export default function PaperEditor({ paper, onSave, saving }) {
               {header.map((line, i) => (
                 <label className="field" key={line.address}>
                   <span>Cell {line.address}</span>
-                  <input value={line.text} onChange={(e) => mutate((d) => (d.content.header[i].text = e.target.value))} />
+                  <input
+                    className={wordsIn(line.text, review).length ? 'needs-check' : ''}
+                    value={line.text}
+                    onChange={(e) => mutate((d) => (d.content.header[i].text = e.target.value))}
+                  />
+                  <CheckHint words={wordsIn(line.text, review)} />
                 </label>
               ))}
             </div>
@@ -228,7 +277,7 @@ export default function PaperEditor({ paper, onSave, saving }) {
                   aria-label="Question number"
                 />
                 <input
-                  className="input-strong"
+                  className={`input-strong ${wordsIn(q.text, review).length ? 'needs-check' : ''}`}
                   value={q.text}
                   onChange={(e) => mutate((d) => (d.content.sections[si].questions[qi].text = e.target.value))}
                   placeholder="Question / instruction (e.g. Fill in the blanks)"
@@ -266,8 +315,9 @@ export default function PaperEditor({ paper, onSave, saving }) {
               </div>
 
               <div className="question-body">
+                <CheckHint words={wordsIn(q.text, review)} />
                 <input
-                  className="input-note"
+                  className={`input-note ${wordsIn(q.note, review).length ? 'needs-check' : ''}`}
                   value={q.note}
                   onChange={(e) => mutate((d) => (d.content.sections[si].questions[qi].note = e.target.value))}
                   placeholder="Note / word bank under the question (optional)"
@@ -283,6 +333,7 @@ export default function PaperEditor({ paper, onSave, saving }) {
                     key={item._key}
                     item={item}
                     index={ii}
+                    review={review}
                     onChange={(next) => mutate((d) => (d.content.sections[si].questions[qi].items[ii] = next))}
                     onRemove={() => mutate((d) => d.content.sections[si].questions[qi].items.splice(ii, 1))}
                   />

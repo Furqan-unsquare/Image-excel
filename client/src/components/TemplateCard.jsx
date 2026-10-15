@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Check } from 'lucide-react';
 import { api, colLetter } from '../api.js';
+import { languageOf } from '../lang.js';
 import { SheetThumbnail } from './SheetPreview.jsx';
 
 const previewCache = new Map();
@@ -63,7 +64,8 @@ export default function TemplateCard({ template, selected, onSelect, footer }) {
           {template.name}
         </div>
         <div className="chips">
-          {templateSummary(template.profile).slice(0, 3).map((s) => (
+          <span className={`chip chip-lang lang-${template.language || 'en'}`}>{languageOf(template.language).native}</span>
+          {templateSummary(template.profile).slice(0, 2).map((s) => (
             <span key={s} className="chip">
               {s}
             </span>

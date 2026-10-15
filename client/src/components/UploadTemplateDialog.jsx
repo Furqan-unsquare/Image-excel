@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import { FileSpreadsheet, LoaderCircle, Upload } from 'lucide-react';
 import { api } from '../api.js';
+import { LANGUAGES } from '../lang.js';
 import Modal from './Modal.jsx';
 
-export default function UploadTemplateDialog({ onClose, onCreated, aiAvailable }) {
+export default function UploadTemplateDialog({ onClose, onCreated, aiAvailable, defaultLanguage = 'auto' }) {
   const [file, setFile] = useState(null);
   const [name, setName] = useState('');
+  const [language, setLanguage] = useState(defaultLanguage);
   const [useAi, setUseAi] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -27,6 +29,7 @@ export default function UploadTemplateDialog({ onClose, onCreated, aiAvailable }
       form.append('file', file);
       form.append('name', name.trim());
       form.append('useAi', String(useAi));
+      if (language !== 'auto') form.append('language', language);
       const template = await api.templates.create(form);
       onCreated(template);
     } catch (err) {
@@ -73,6 +76,23 @@ export default function UploadTemplateDialog({ onClose, onCreated, aiAvailable }
           <span>Format name</span>
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Unit test – Std 5" maxLength={120} />
         </label>
+        <label className="field">
+          <span>Language of the papers</span>
+          <select value={language} onChange={(e) => setLanguage(e.target.value)}>
+            <option value="auto">Detect from the file</option>
+            {LANGUAGES.map((l) => (
+              <option key={l.code} value={l.code}>
+                {l.native === l.name ? l.name : `${l.native} (${l.name})`}
+              </option>
+            ))}
+          </select>
+        </label>
+        {language !== 'en' && (
+          <p className="muted small">
+            Hindi and Marathi formats work best with a Unicode font (Nirmala UI, Mangal, Kokila). Files typed in Kruti Dev or
+            Shree-Lipi are accepted, but their header lines cannot be filled in automatically.
+          </p>
+        )}
         {aiAvailable && (
           <label className="check">
             <input type="checkbox" checked={useAi} onChange={(e) => setUseAi(e.target.checked)} />

@@ -7,9 +7,25 @@ import { buildPaperWorkbook } from './excelGenerator.js';
 import { extractText } from './ocr.js';
 import { applyMissingMarks, buildHeaderLines, normalizeContent, paperTitle, structureText } from './paperParser.js';
 import { safeFileName } from '../utils/http.js';
+import { detectLanguage, LANGUAGE_NAMES, normalizeLanguage } from '../utils/lang.js';
 import sharp from 'sharp';
 
 const running = new Set();
+
+// The photos are read in the format's language; say so when they look like another one.
+function languageWarning(language, text, templateName) {
+  const found = detectLanguage(text);
+  const clear = found.language === 'en' ? found.devanagariShare < 0.1 && found.sure : found.devanagariShare > 0.5;
+  if (!clear || found.language === language || (language !== 'en' && found.language !== 'en' && !found.sure)) return null;
+  const want = LANGUAGE_NAMES[found.language];
+  return `These photos look ${want}, but "${templateName}" is a ${LANGUAGE_NAMES[language]} format. For ${want} papers choose a ${want} format (upload one first if you have none), then click "Run again".`;
+}
+
+// Words the letter-check flagged that ended up in the paper.
+function reviewWords(words, content) {
+  const all = JSON.stringify(content);
+  return (words || []).filter((w) => all.includes(w.word));
+}
 
 async function setProgress(id, stage, message, percent) {
   await Paper.updateOne({ _id: id }, { $set: { progress: { stage, message, percent } } });
@@ -46,6 +62,8 @@ export async function processPaper(paperId) {
     const template = await Template.findById(paper.template).select('+file');
     if (!template) throw new Error('The selected format no longer exists. Pick another format.');
 
+    const language = normalizeLanguage(template.profile?.language);
+    paper.language = language;
     await setProgress(paperId, 'prepare', 'Preparing images', 5);
     const stored = await PaperImage.find({ paper: paperId }).sort({ index: 1 });
     if (!stored.length) throw new Error('No images were found for this paper.');
@@ -68,11 +86,14 @@ export async function processPaper(paperId) {
       },
       (seconds) =>
         setProgress(paperId, 'ocr', `Groq free-tier limit reached – waiting ${seconds}s, then continuing`, ocrPercent()),
+      { language },
     );
     if (!ocr.text.trim()) throw new Error('No text could be read from the images. Try clearer, well-lit photos.');
+    const languageNote = languageWarning(language, ocr.text, template.name);
 
     await setProgress(paperId, 'structure', 'Finding questions, sub-questions and marks', 65);
     const structured = await structureText(ocr.text, {
+      language,
       onWait: (seconds) =>
         setProgress(paperId, 'structure', `Groq free-tier limit reached – waiting ${seconds}s, then continuing`, 65),
     });
@@ -84,10 +105,22 @@ export async function processPaper(paperId) {
     paper.ocr = { method: ocr.method, text: ocr.text };
     paper.structureMethod = structured.method;
     paper.content = content;
+    paper.review = { words: reviewWords(ocr.review?.words, content) };
     const today = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
     const keepTitle = paper.title && paper.title !== 'Question paper' && !paper.title.startsWith('Question paper ');
     if (!keepTitle) paper.title = paperTitle(content, `Question paper ${today}`);
-    paper.warnings = [...ocr.warnings, ...structured.warnings, ...(marksNote ? [marksNote] : [])];
+    paper.warnings = [
+      ...(languageNote ? [languageNote] : []),
+      ...ocr.warnings,
+      ...structured.warnings,
+      ...(marksNote ? [marksNote] : []),
+    ];
+    if (paper.review.words.length) {
+      const n = paper.review.words.length;
+      paper.warnings.push(
+        `${n} word${n > 1 ? 's' : ''} may be misread. They are highlighted in "Edit questions" – please compare them with the photo.`,
+      );
+    }
     await generateOutput(paper, template);
 
     const questionCount = content.sections.reduce((n, s) => n + s.questions.length, 0);

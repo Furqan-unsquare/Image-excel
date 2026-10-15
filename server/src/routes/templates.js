@@ -6,8 +6,9 @@ import { analyzeTemplate, mergeProfileSettings } from '../services/templateAnaly
 import { buildPaperWorkbook } from '../services/excelGenerator.js';
 import { renderBuffer, renderWorksheet } from '../services/sheetRender.js';
 import { normalizeContent, buildHeaderLines } from '../services/paperParser.js';
-import { SAMPLE_CONTENT } from '../services/sampleContent.js';
+import { sampleContent } from '../services/sampleContent.js';
 import { httpError, isObjectId } from '../utils/http.js';
+import { LANGUAGES } from '../utils/lang.js';
 
 const router = Router();
 
@@ -28,6 +29,7 @@ const upload = multer({
 export const templateDto = (t) => ({
   id: String(t._id),
   name: t.name,
+  language: t.profile?.language || 'en',
   description: t.description,
   originalFileName: t.originalFileName,
   profile: t.profile,
@@ -55,8 +57,10 @@ router.get('/', async (req, res) => {
 
 router.post('/', upload.single('file'), async (req, res) => {
   if (!req.file) throw httpError(400, 'Choose an Excel (.xlsx) file to upload.');
+  const language = LANGUAGES.includes(req.body?.language) ? req.body.language : 'auto';
   const { profile, method, warnings } = await analyzeTemplate(req.file.buffer, {
     forceLlm: String(req.body?.useAi) === 'true',
+    language,
   });
   const name = String(req.body?.name || '').trim() || req.file.originalname.replace(/\.xlsx$/i, '');
   const t = await Template.create({
@@ -83,7 +87,7 @@ router.get('/:id/preview', async (req, res) => {
 // Demo questions written in this format, so changes to the settings can be seen.
 router.get('/:id/sample-preview', async (req, res) => {
   const t = await findTemplate(req.params.id, true);
-  const content = normalizeContent(SAMPLE_CONTENT);
+  const content = normalizeContent(sampleContent(t.profile.language));
   content.header = buildHeaderLines(t.profile, content);
   const { worksheet } = await buildPaperWorkbook({ templateBuffer: t.file, profile: t.profile, content });
   res.json(renderWorksheet(worksheet));
@@ -111,7 +115,11 @@ router.patch('/:id', async (req, res) => {
 
 router.post('/:id/reanalyze', async (req, res) => {
   const t = await findTemplate(req.params.id, true);
-  const { profile, method, warnings } = await analyzeTemplate(t.file, { forceLlm: Boolean(req.body?.useAi) });
+  // Keeps the language the format was saved with; the layout is detected again.
+  const { profile, method, warnings } = await analyzeTemplate(t.file, {
+    forceLlm: Boolean(req.body?.useAi),
+    language: t.profile?.language || 'auto',
+  });
   t.profile = profile;
   t.analysis = { method, warnings, analyzedAt: new Date() };
   t.markModified('profile');
